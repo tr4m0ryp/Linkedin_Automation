@@ -1,0 +1,78 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo.lock is checked in for binary crates
+# (do NOT gitignore it)
+
+# Environment and configuration
+.env
+.env.local
+.env.*.local
+
+# Profile data (contains personal information)
+linkedin_profiles.csv
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Python bytecode and caches
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+venv/
+.venv/
+
+# Session data (cookies, browser profiles)
+sessions/
+profiles/
+cookies/
+*.json.bak
+
+# Logs and data
+logs/
+*.log
+data/
+output/
+scraped_data/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Testing
+coverage/
+*.profraw
+*.profdata
+
+# Documentation build
+/docs/_build/
+/target/doc/
+
+# OS files
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Compiled static libraries
+*.a
+*.lib
+
+# Compiled dynamic libraries
+*.so
+*.dylib
+*.dll

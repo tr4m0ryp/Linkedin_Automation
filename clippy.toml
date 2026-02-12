@@ -1,0 +1,20 @@
+# Clippy linting configuration
+
+# Cognitive complexity limit per function
+cognitive-complexity-threshold = 30
+
+# Type complexity limit
+type-complexity-threshold = 250
+
+# Too many arguments limit
+too-many-arguments-threshold = 7
+
+# Too many lines limit (enforces 300-line limit)
+too-many-lines-threshold = 300
+
+# Literal width threshold
+literal-representation-threshold = 10
+
+# Allow some common patterns
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true

@@ -1,14 +1,13 @@
 //! Batch orchestrator that drives the full connection workflow.
 //!
 //! 1. Load CSV, filter unsent profiles
-//! 2. Initialize BrowserSession
-//! 3. Navigate to LinkedIn, wait for manual login
-//! 4. Loop: send_connection(), mark CSV, delay on success only
-//! 5. Print summary
+//! 2. Initialize LinkedInClient (load cookies or run one-time login)
+//! 3. Loop: send_connection(), mark CSV, delay on success only
+//! 4. Print summary
 
-use crate::browser::BrowserSession;
 use crate::config::AppConfig;
 use crate::error::Result;
+use crate::linkedin_api::{self, LinkedInClient, SessionConfig};
 use super::connection_sender;
 use super::csv_reader::CsvManager;
 use super::types::{ConnectionAttempt, ConnectionResult};
@@ -19,11 +18,12 @@ use tracing::{info, warn, error, debug};
 pub struct Runner {
     config: AppConfig,
     dry_run: bool,
+    force_login: bool,
 }
 
 impl Runner {
-    pub fn new(config: AppConfig, dry_run: bool) -> Self {
-        Self { config, dry_run }
+    pub fn new(config: AppConfig, dry_run: bool, force_login: bool) -> Self {
+        Self { config, dry_run, force_login }
     }
 
     pub async fn run(&self) -> Result<()> {
@@ -40,18 +40,7 @@ impl Runner {
         let profiles = csv.read_unsent()?;
         info!("Will process all {} unsent profiles", profiles.len());
 
-        // Launch browser
-        let session = BrowserSession::new(
-            self.config.browser.clone(),
-            false,
-        )
-        .await?;
-
-        // Navigate to LinkedIn and wait for login
-        session.goto("https://www.linkedin.com").await?;
-        info!("Please log in to LinkedIn in the browser window.");
-        self.wait_for_login(&session).await?;
-        info!("Login detected. Starting connection loop.");
+        let client = self.build_client().await?;
 
         let mut attempts: Vec<ConnectionAttempt> = Vec::new();
         let mut sent_count: u32 = 0;
@@ -59,7 +48,7 @@ impl Runner {
 
         for profile in &profiles {
             let attempt = connection_sender::send_connection(
-                session.driver(),
+                &client,
                 &profile.linkedin_url,
                 self.dry_run,
             )
@@ -117,26 +106,40 @@ impl Runner {
         }
 
         self.print_summary(&attempts, sent_count);
-        session.close().await?;
         Ok(())
     }
 
-    /// Poll the current URL until it contains `/feed/`, indicating successful login.
-    async fn wait_for_login(&self, session: &BrowserSession) -> Result<()> {
-        let timeout = Duration::from_secs(300);
-        let start = tokio::time::Instant::now();
+    /// Build the LinkedIn API client, running one-time login if needed.
+    async fn build_client(&self) -> Result<LinkedInClient> {
+        let cookie_file = &self.config.api.cookie_file;
+        let user_agent = &self.config.api.user_agent;
 
-        loop {
-            if let Ok(url) = session.current_url().await {
-                if url.contains("/feed/") || url.contains("/feed") {
-                    return Ok(());
-                }
+        let needs_login = self.force_login
+            || !std::path::Path::new(cookie_file).exists()
+            || !linkedin_api::validate_session(cookie_file, user_agent).await?;
+
+        let csrf_token = if needs_login {
+            if !self.force_login && std::path::Path::new(cookie_file).exists() {
+                info!("Session expired or invalid. Re-authenticating...");
             }
-            if start.elapsed() >= timeout {
-                return Err(crate::error::LinkedInError::Timeout { seconds: 300 });
-            }
-            sleep(Duration::from_secs(2)).await;
+            linkedin_api::one_time_login(cookie_file, user_agent).await?
+        } else {
+            // Load CSRF from existing cookies
+            let jar = linkedin_api::load_cookies(cookie_file)?;
+            crate::linkedin_api::session::extract_csrf_token(&jar).unwrap_or_default()
+        };
+
+        if csrf_token.is_empty() {
+            warn!("CSRF token is empty -- API calls may fail");
         }
+
+        let session_config = SessionConfig {
+            cookie_file: cookie_file.clone(),
+            user_agent: user_agent.clone(),
+            csrf_token,
+        };
+
+        LinkedInClient::new(&session_config)
     }
 
     fn print_summary(&self, attempts: &[ConnectionAttempt], sent_count: u32) {

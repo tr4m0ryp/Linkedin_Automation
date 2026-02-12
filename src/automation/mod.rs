@@ -1,8 +1,6 @@
 mod connection_sender;
 mod csv_reader;
-mod human_behavior;
 mod runner;
-mod selectors;
 mod types;
 
 pub use csv_reader::CsvManager;

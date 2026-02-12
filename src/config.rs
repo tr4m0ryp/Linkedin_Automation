@@ -1,13 +1,21 @@
 //! Application configuration loaded from environment variables.
 
 use crate::error::{LinkedInError, Result};
-use crate::browser::BrowserConfig;
 
 /// Top-level application configuration.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
-    pub browser: BrowserConfig,
+    pub api: ApiConfig,
     pub automation: AutomationSettings,
+}
+
+/// Configuration for the LinkedIn API client.
+#[derive(Debug, Clone)]
+pub struct ApiConfig {
+    /// Path to the persisted cookie JSON file.
+    pub cookie_file: String,
+    /// Browser user-agent string to mimic.
+    pub user_agent: String,
 }
 
 /// Settings controlling the connection automation loop.
@@ -39,16 +47,17 @@ fn env_or_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
+const DEFAULT_USER_AGENT: &str =
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+
 /// Load configuration from the `.env` file and environment variables.
 pub fn load_config(env_path: &str) -> Result<AppConfig> {
     dotenv::from_filename(env_path).ok();
 
-    let browser = BrowserConfig {
-        browser_type: env_or("BROWSER_TYPE", "chromium"),
-        headless: env_or_parse("HEADLESS", false),
-        session_dir: env_or("SESSION_DIR", "sessions/linkedin_session"),
-        webdriver_url: env_or("WEBDRIVER_URL", "http://localhost:4444"),
-        debug_port: env_or_parse("DEBUG_PORT", 9222),
+    let api = ApiConfig {
+        cookie_file: env_or("COOKIE_FILE", "sessions/linkedin_cookies.json"),
+        user_agent: env_or("USER_AGENT", DEFAULT_USER_AGENT),
     };
 
     let automation = AutomationSettings {
@@ -57,15 +66,12 @@ pub fn load_config(env_path: &str) -> Result<AppConfig> {
         max_delay_min: env_or_parse("MAX_DELAY_MIN", 15),
     };
 
-    validate_config(&browser, &automation)?;
+    validate_config(&automation)?;
 
-    Ok(AppConfig { browser, automation })
+    Ok(AppConfig { api, automation })
 }
 
-fn validate_config(
-    _browser: &BrowserConfig,
-    automation: &AutomationSettings,
-) -> Result<()> {
+fn validate_config(automation: &AutomationSettings) -> Result<()> {
     if automation.min_delay_min > automation.max_delay_min {
         return Err(LinkedInError::ConfigError(
             "MIN_DELAY_MIN must be <= MAX_DELAY_MIN".to_string(),

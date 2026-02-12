@@ -15,9 +15,13 @@ struct Args {
     #[arg(short, long)]
     verbose: bool,
 
-    /// Dry run -- iterate profiles but do not click Connect.
+    /// Dry run -- iterate profiles but do not send invitations.
     #[arg(short, long)]
     dry_run: bool,
+
+    /// Force re-authentication (one-time browser login).
+    #[arg(short, long)]
+    login: bool,
 
     /// Path to the profiles CSV file.
     #[arg(long, default_value = "linkedin_profiles.csv")]
@@ -57,7 +61,7 @@ async fn main() -> Result<()> {
         info!("Mode: DRY RUN -- no connections will be sent");
     }
 
-    let runner = Runner::new(config, args.dry_run);
+    let runner = Runner::new(config, args.dry_run, args.login);
 
     if let Err(e) = runner.run().await {
         error!("Automation failed: {}", e);

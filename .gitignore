@@ -12,7 +12,7 @@
 .env.*.local
 
 # Profile data (contains personal information)
-linkedin_profiles.csv
+# linkedin_profiles.csv
 
 # IDE and editor files
 .vscode/

@@ -36,11 +36,62 @@ impl std::fmt::Display for ConnectionResult {
     }
 }
 
+/// Network-distance classification for a profile.
+///
+/// Persisted in the CSV as the `degree` column. The serialized form is `""`
+/// for `Unknown`, `"2"` for `Second`, and `"3"` for `ThirdOrMore`. A
+/// 1st-degree connection (already connected) is folded into `Second` for
+/// purposes of "this is a candidate to send to" -- callers gate on
+/// `connection_state` separately when they need to distinguish (D3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum Degree {
+    /// 2nd-degree connection (sendable candidate).
+    Second,
+    /// 3rd-degree or more distant. Skipped by the ranker (D3).
+    ThirdOrMore,
+    /// Not yet fetched from the LinkedIn API.
+    #[default]
+    Unknown,
+}
+
+impl Degree {
+    /// Parse the serialized form persisted in the CSV.
+    ///
+    /// Recognizes `"2"` -> `Second`, `"3"` -> `ThirdOrMore`. Any other value
+    /// (including the empty string and whitespace) maps to `Unknown` so legacy
+    /// rows and future-extended values fail soft.
+    pub fn from_csv_value(value: &str) -> Self {
+        match value.trim() {
+            "2" => Self::Second,
+            "3" => Self::ThirdOrMore,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+impl std::fmt::Display for Degree {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Second => write!(f, "2"),
+            Self::ThirdOrMore => write!(f, "3"),
+            Self::Unknown => write!(f, ""),
+        }
+    }
+}
+
 /// A single row from the CSV file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CsvProfile {
+    /// LinkedIn profile URL (e.g. `https://www.linkedin.com/in/<vanity>/`).
     pub linkedin_url: String,
+    /// Whether a connection request has already been sent for this row.
     pub is_sent: bool,
+    /// Cached network-distance classification (D4).
+    #[serde(default)]
+    pub degree: Degree,
+    /// Timestamp of the last `degree` check, for staleness checks (D4).
+    #[serde(default)]
+    pub degree_checked_at: Option<DateTime<Utc>>,
 }
 
 /// Record of one connection attempt for logging/reporting.
@@ -63,6 +114,28 @@ impl ConnectionAttempt {
             result,
             timestamp: Utc::now(),
             error_message,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn degree_from_csv_value_parses_known_values() {
+        assert_eq!(Degree::from_csv_value("2"), Degree::Second);
+        assert_eq!(Degree::from_csv_value("3"), Degree::ThirdOrMore);
+        assert_eq!(Degree::from_csv_value(""), Degree::Unknown);
+        assert_eq!(Degree::from_csv_value("  "), Degree::Unknown);
+        assert_eq!(Degree::from_csv_value("foo"), Degree::Unknown);
+    }
+
+    #[test]
+    fn degree_display_round_trips_through_csv_value() {
+        for d in [Degree::Second, Degree::ThirdOrMore, Degree::Unknown] {
+            let s = d.to_string();
+            assert_eq!(Degree::from_csv_value(&s), d);
         }
     }
 }

@@ -11,3 +11,13 @@ pub use humanizer::{
 };
 pub use runner::Runner;
 pub use types::{ConnectionAttempt, ConnectionResult, CsvProfile, Degree};
+
+use crate::error::LinkedInError;
+
+/// Errors the orchestrator must react to (auth dropped, server-side back-off).
+pub(crate) fn is_fatal(e: &LinkedInError) -> bool {
+    matches!(
+        e,
+        LinkedInError::SessionExpired | LinkedInError::RateLimitExceeded { .. }
+    )
+}

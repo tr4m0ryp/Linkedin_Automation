@@ -12,8 +12,9 @@
 
 use crate::automation::csv_reader::CsvManager;
 use crate::automation::humanizer::Humanizer;
+use crate::automation::is_fatal;
 use crate::automation::types::Degree;
-use crate::error::{LinkedInError, Result};
+use crate::error::Result;
 use crate::linkedin_api::LinkedInClient;
 use chrono::Utc;
 use tracing::{debug, error, info, warn};
@@ -71,12 +72,4 @@ pub async fn run_discovery_pass(
 
     info!(new_seconds, "discovery pass complete");
     Ok(new_seconds)
-}
-
-/// Errors the orchestrator must react to (auth dropped, server-side back-off).
-fn is_fatal(e: &LinkedInError) -> bool {
-    matches!(
-        e,
-        LinkedInError::SessionExpired | LinkedInError::RateLimitExceeded { .. }
-    )
 }

@@ -14,6 +14,7 @@ use super::connection_sender;
 use super::csv_reader::CsvManager;
 use super::discovery;
 use super::humanizer::{Humanizer, DEFAULT_STATE_PATH};
+use super::is_fatal;
 use super::types::{ConnectionResult, Degree};
 use crate::config::AppConfig;
 use crate::error::{LinkedInError, Result};
@@ -219,12 +220,4 @@ impl Runner {
 
         LinkedInClient::new(&session_config)
     }
-}
-
-/// Errors the orchestrator must react to (auth dropped, server-side back-off).
-fn is_fatal(e: &LinkedInError) -> bool {
-    matches!(
-        e,
-        LinkedInError::SessionExpired | LinkedInError::RateLimitExceeded { .. }
-    )
 }

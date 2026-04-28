@@ -28,6 +28,14 @@ pub struct ProfileData {
     pub last_name: String,
     /// Current connection state with this profile.
     pub connection_state: ConnectionState,
+    /// Raw member distance code from the WebTopCardCore-16 response.
+    ///
+    /// Maps from the `memberDistance.value` string in the response:
+    /// `"DISTANCE_1"` -> `Some(1)`, `"DISTANCE_2"` -> `Some(2)`,
+    /// `"DISTANCE_3"` -> `Some(3)`, `"OUT_OF_NETWORK"` -> `Some(4)`,
+    /// missing or unparseable -> `None`.
+    #[serde(default)]
+    pub member_distance: Option<i32>,
 }
 
 /// Connection state between the authenticated user and a target profile.

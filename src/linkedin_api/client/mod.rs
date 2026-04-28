@@ -1,19 +1,16 @@
-//! Core HTTP client for the LinkedIn Voyager API.
-//!
-//! Wraps `reqwest::Client` with persistent cookies and the headers LinkedIn
-//! expects on every API request.
+//! Core HTTP client for the LinkedIn Voyager API. Decoy helpers in `decoys`.
 
-use crate::error::{LinkedInError, Result};
+mod decoys;
+
 use super::session;
-use super::types::{
-    ConnectionState, InvitationResponse, ProfileData, SessionConfig,
-};
+use super::types::{ConnectionState, InvitationResponse, ProfileData, SessionConfig};
+use crate::error::{LinkedInError, Result};
 use reqwest::header::{HeaderMap, HeaderValue};
 use tracing::{debug, warn};
 
 /// Authenticated HTTP client for LinkedIn's internal Voyager API.
 pub struct LinkedInClient {
-    client: reqwest::Client,
+    pub(super) client: reqwest::Client,
     csrf_token: String,
     cookie_file: String,
 }
@@ -26,9 +23,7 @@ impl LinkedInClient {
             .cookie_provider(jar)
             .user_agent(&config.user_agent)
             .build()
-            .map_err(|e| LinkedInError::ApiError(format!(
-                "Failed to build HTTP client: {}", e
-            )))?;
+            .map_err(|e| LinkedInError::ApiError(format!("Failed to build HTTP client: {}", e)))?;
 
         Ok(Self {
             client,
@@ -41,7 +36,7 @@ impl LinkedInClient {
         &self.cookie_file
     }
 
-    fn default_headers(&self) -> HeaderMap {
+    pub(crate) fn default_headers(&self) -> HeaderMap {
         let mut headers = HeaderMap::new();
         if let Ok(v) = HeaderValue::from_str(&format!("ajax:{}", self.csrf_token)) {
             headers.insert("csrf-token", v);
@@ -75,9 +70,7 @@ impl LinkedInClient {
             .headers(self.default_headers())
             .send()
             .await
-            .map_err(|e| LinkedInError::ApiError(format!(
-                "Profile request failed: {}", e
-            )))?;
+            .map_err(|e| LinkedInError::ApiError(format!("Profile request failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         if status == 401 || status == 403 {
@@ -88,7 +81,8 @@ impl LinkedInClient {
         }
         if !resp.status().is_success() {
             return Err(LinkedInError::ProfileResolutionError(format!(
-                "HTTP {} for profile {}", status, public_id
+                "HTTP {} for profile {}",
+                status, public_id
             )));
         }
 
@@ -100,10 +94,7 @@ impl LinkedInClient {
     }
 
     /// Send a connection invitation to the given profile.
-    pub async fn send_invitation(
-        &self,
-        profile: &ProfileData,
-    ) -> Result<InvitationResponse> {
+    pub async fn send_invitation(&self, profile: &ProfileData) -> Result<InvitationResponse> {
         let payload = serde_json::json!({
             "invitee": {
                 "inviteeUnion": {
@@ -132,9 +123,7 @@ impl LinkedInClient {
             .json(&payload)
             .send()
             .await
-            .map_err(|e| LinkedInError::ApiError(format!(
-                "Invitation request failed: {}", e
-            )))?;
+            .map_err(|e| LinkedInError::ApiError(format!("Invitation request failed: {}", e)))?;
 
         let status = resp.status().as_u16();
         let body = resp.text().await.unwrap_or_default();
@@ -181,21 +170,20 @@ fn extract_public_id(url: &str) -> Result<String> {
         Ok(slug.to_string())
     } else {
         Err(LinkedInError::ProfileResolutionError(format!(
-            "Cannot extract public ID from URL: {}", url
+            "Cannot extract public ID from URL: {}",
+            url
         )))
     }
 }
 
 /// Parse the `/identity/dash/profiles` response into `ProfileData`.
-fn parse_profile_response(
-    public_id: &str,
-    body: &serde_json::Value,
-) -> Result<ProfileData> {
-    let element = body
-        .pointer("/elements/0")
-        .ok_or_else(|| LinkedInError::ProfileResolutionError(format!(
-            "No elements in profile response for {}", public_id
-        )))?;
+fn parse_profile_response(public_id: &str, body: &serde_json::Value) -> Result<ProfileData> {
+    let element = body.pointer("/elements/0").ok_or_else(|| {
+        LinkedInError::ProfileResolutionError(format!(
+            "No elements in profile response for {}",
+            public_id
+        ))
+    })?;
 
     let profile_urn = element
         .get("entityUrn")
@@ -204,11 +192,7 @@ fn parse_profile_response(
         .to_string();
 
     // Extract the member ID from the URN (last colon-separated segment)
-    let member_id = profile_urn
-        .rsplit(':')
-        .next()
-        .unwrap_or("")
-        .to_string();
+    let member_id = profile_urn.rsplit(':').next().unwrap_or("").to_string();
 
     let first_name = element
         .get("firstName")
@@ -223,10 +207,12 @@ fn parse_profile_response(
         .to_string();
 
     let connection_state = parse_member_relationship(element);
+    let member_distance = parse_member_distance(element);
 
     if member_id.is_empty() || profile_urn.is_empty() {
         return Err(LinkedInError::ProfileResolutionError(format!(
-            "Could not extract member ID for {}", public_id,
+            "Could not extract member ID for {}",
+            public_id,
         )));
     }
 
@@ -237,6 +223,7 @@ fn parse_profile_response(
         first_name,
         last_name,
         connection_state,
+        member_distance,
     })
 }
 
@@ -259,7 +246,42 @@ fn parse_member_relationship(element: &serde_json::Value) -> ConnectionState {
             } else {
                 ConnectionState::Unknown
             }
-        }
+        },
         None => ConnectionState::Unknown,
     }
+}
+
+/// Parse the `memberDistance` field from the dash profiles element.
+///
+/// The WebTopCardCore-16 decoration emits a string value such as
+/// `"DISTANCE_2"` or `"OUT_OF_NETWORK"`. The exact key has shifted across
+/// deploys, so we probe `value`, then `distance`, then `distanceValue`.
+fn parse_member_distance(element: &serde_json::Value) -> Option<i32> {
+    let raw = element
+        .pointer("/memberDistance/value")
+        .or_else(|| element.pointer("/memberDistance/distance"))
+        .or_else(|| element.pointer("/memberDistance/distanceValue"))
+        .and_then(|v| v.as_str());
+
+    let raw = match raw {
+        Some(s) => s,
+        None => {
+            debug!("memberDistance not present in profile element");
+            return None;
+        },
+    };
+
+    if raw == "OUT_OF_NETWORK" {
+        return Some(4);
+    }
+    if let Some(suffix) = raw.strip_prefix("DISTANCE_") {
+        if let Ok(n) = suffix.parse::<i32>() {
+            return Some(n);
+        }
+    }
+    debug!(
+        raw = raw,
+        "memberDistance value did not match known patterns"
+    );
+    None
 }

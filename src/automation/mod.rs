@@ -1,5 +1,6 @@
 mod connection_sender;
 mod csv_reader;
+pub mod discovery;
 pub mod humanizer;
 mod runner;
 mod types;

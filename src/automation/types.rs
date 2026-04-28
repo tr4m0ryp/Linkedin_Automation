@@ -67,6 +67,23 @@ impl Degree {
             _ => Self::Unknown,
         }
     }
+
+    /// Map a raw `memberDistance` code (per `ProfileData::member_distance`)
+    /// to the ranker-facing `Degree` enum.
+    ///
+    /// `Some(1)` (already 1st-degree) and `Some(2)` collapse to `Second`
+    /// because both are sendable / connectable signals (D3). Larger codes
+    /// (3rd-degree, OUT_OF_NETWORK reported as `Some(4)`, etc.) map to
+    /// `ThirdOrMore`. `None` -- distance was not present or could not be
+    /// parsed -- falls back to `Unknown` so the discovery pass treats the
+    /// row as still needing a re-check.
+    pub fn from_member_distance(d: Option<i32>) -> Self {
+        match d {
+            Some(1) | Some(2) => Self::Second,
+            Some(_) => Self::ThirdOrMore,
+            None => Self::Unknown,
+        }
+    }
 }
 
 impl std::fmt::Display for Degree {
@@ -137,5 +154,15 @@ mod tests {
             let s = d.to_string();
             assert_eq!(Degree::from_csv_value(&s), d);
         }
+    }
+
+    #[test]
+    fn degree_from_member_distance_maps_known_codes() {
+        assert_eq!(Degree::from_member_distance(Some(1)), Degree::Second);
+        assert_eq!(Degree::from_member_distance(Some(2)), Degree::Second);
+        assert_eq!(Degree::from_member_distance(Some(3)), Degree::ThirdOrMore);
+        assert_eq!(Degree::from_member_distance(Some(4)), Degree::ThirdOrMore);
+        assert_eq!(Degree::from_member_distance(Some(99)), Degree::ThirdOrMore);
+        assert_eq!(Degree::from_member_distance(None), Degree::Unknown);
     }
 }

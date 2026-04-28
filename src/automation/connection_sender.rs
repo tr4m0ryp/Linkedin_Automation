@@ -3,9 +3,9 @@
 //! Resolves a profile URL to member data, checks connection state, and sends
 //! an invitation via the API.
 
-use crate::linkedin_api::{LinkedInClient, ConnectionState};
 use super::types::{ConnectionAttempt, ConnectionResult};
-use tracing::{info, debug, warn};
+use crate::linkedin_api::{ConnectionState, LinkedInClient};
+use tracing::{debug, info, warn};
 
 /// Send a connection request to a single profile via the API.
 ///
@@ -33,19 +33,36 @@ async fn attempt_connection(
         Err(e) => {
             warn!("Failed to resolve profile {}: {}", profile_url, e);
             return ConnectionResult::Error(format!("Profile resolution failed: {}", e));
-        }
+        },
     };
 
     debug!(
-        "Resolved: {} {} (id={}, state={})",
-        profile.first_name, profile.last_name, profile.member_id, profile.connection_state
+        "Resolved: {} {} (id={}, state={}, distance={:?})",
+        profile.first_name,
+        profile.last_name,
+        profile.member_id,
+        profile.connection_state,
+        profile.member_distance,
     );
 
-    // Check connection state -- return early if already connected or pending
+    // Edge case: a profile reporting `DISTANCE_1` (already 1st-degree) yet
+    // also `NotConnected` indicates a stale cache or a recently-disconnected
+    // contact. Log loudly but proceed with the invitation -- the invite API
+    // is the source of truth.
+    if profile.member_distance == Some(1)
+        && matches!(profile.connection_state, ConnectionState::NotConnected)
+    {
+        warn!(
+            url = %profile_url,
+            "profile reports 1st-degree distance but NotConnected state -- proceeding"
+        );
+    }
+
+    // Check connection state -- return early if already connected or pending.
     match profile.connection_state {
         ConnectionState::Connected => return ConnectionResult::AlreadyConnected,
         ConnectionState::Pending => return ConnectionResult::Pending,
-        ConnectionState::NotConnected | ConnectionState::Unknown => {}
+        ConnectionState::NotConnected | ConnectionState::Unknown => {},
     }
 
     if dry_run {
@@ -63,10 +80,8 @@ async fn attempt_connection(
                 resp.status_code, profile_url, resp.body
             );
             ConnectionResult::Error(format!("API returned {}", resp.status_code))
-        }
-        Err(crate::error::LinkedInError::RateLimitExceeded { .. }) => {
-            ConnectionResult::RateLimited
-        }
+        },
+        Err(crate::error::LinkedInError::RateLimitExceeded { .. }) => ConnectionResult::RateLimited,
         Err(e) => ConnectionResult::Error(format!("{}", e)),
     }
 }
